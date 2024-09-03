@@ -18,6 +18,7 @@ public class ReplyDTO {
     private String profileImageURL;         // 댓글 작성자의 프로필 이미지 URL
     private int likeCount;                  // 좋아요 수
     private Long parentCommentId;           // 부모 댓글 ID
+    private Long parentReplyId;             // 부모 대댓글 ID 추가
     private String relativeTime; // 몇 분 전, 몇 시간 전 등 상대 시간
 
 }

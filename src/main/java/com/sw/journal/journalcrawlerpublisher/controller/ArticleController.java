@@ -18,10 +18,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
@@ -314,6 +311,23 @@ public class ArticleController {
         return new PageImpl<>(articleDTOs, pageable, articlePage.getTotalElements());
     }
 
-
+    // 기사 ID로 특정 기사 가져오기
+    @GetMapping("/{articleId}")
+    public ResponseEntity<ArticleWithTagsDTO> getArticleById(@PathVariable Long articleId) {
+        Optional<Article> optionalArticle = articleService.findById(articleId);
+        if (optionalArticle.isPresent()) {
+            Article article = optionalArticle.get();
+            // 태그와 이미지 URL 을 서비스에서 가져와 DTO 생성
+            List<Tag> tags = tagService.findByArticle(article);
+            List<String> imgUrls = imageService.findByArticle(article).stream()
+                    .map(Image::getImgUrl)
+                    .collect(Collectors.toList());
+            // DTO 생성 및 반환
+            ArticleWithTagsDTO dto = ArticleWithTagsDTO.from(article, tags, imgUrls);
+            return ResponseEntity.ok(dto);
+        } else {
+            return ResponseEntity.notFound().build();
+        }
+    }
 
 }

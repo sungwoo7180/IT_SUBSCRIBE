@@ -30,7 +30,6 @@ public class CommentController {
     // 1. 댓글 생성
     @PostMapping
     public ResponseEntity<CommentDTO> createComment(@RequestBody CommentDTO commentDTO) {
-        // 댓글을 생성하고 생성된 댓글 DTO 를 반환
         CommentDTO createdComment = commentService.createComment(commentDTO);
         return ResponseEntity.ok(createdComment);
     }
@@ -47,8 +46,7 @@ public class CommentController {
     @GetMapping("/articles/{articleId}/comments")
     public ResponseEntity<List<CommentDTO>> getCommentsByArticle(
             @PathVariable Long articleId,
-            @RequestParam(defaultValue = "likes") String filter) { // 디폴트는 좋아요 순
-
+            @RequestParam(defaultValue = "likes") String filter) {
         List<CommentDTO> comments = commentService.getCommentsByArticle(articleId, filter);
         return ResponseEntity.ok(comments);
     }
@@ -87,7 +85,7 @@ public class CommentController {
 
     // 7. 댓글 삭제
     @DeleteMapping("/{commentId}")
-    public ResponseEntity<Void> deleteComment(@PathVariable Long commentId) {
+    public ResponseEntity<String> deleteComment(@PathVariable Long commentId) {
         // 댓글 ID로 댓글 삭제
         commentService.deleteComment(commentId);
         // 삭제 성공 시 204 No Content 응답 반환
@@ -96,7 +94,7 @@ public class CommentController {
 
     // 8. 대댓글 삭제
     @DeleteMapping("/reply/{replyId}")
-    public ResponseEntity<Void> deleteReply(@PathVariable Long replyId) {
+    public ResponseEntity<String> deleteReply(@PathVariable Long replyId) {
         commentService.deleteReply(replyId);
         return ResponseEntity.noContent().build();
     }
@@ -143,5 +141,7 @@ public class CommentController {
             throw new UnauthorizedException("수정 권한이 없습니다");
         }
     }
+
+
 
 }

@@ -28,10 +28,8 @@ public class Comment {
     @JoinColumn(name = "member_id", nullable = false)
     private Member member;
 
-    // 대댓글을 위해 추가된 부분
-    @ManyToOne
-    @JoinColumn(name = "parent_comment_id")
-    private Comment parentComment;
+    @Column(nullable = false)
+    private int replyCount = 0; // 초기값을 0으로 설정
 
     @ManyToOne
     @JoinColumn(name = "article_id", nullable = false)

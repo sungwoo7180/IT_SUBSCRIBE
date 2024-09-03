@@ -29,7 +29,17 @@ public class ArticleWithTagsDTO {
     private List<Tag> tags; // 기사 태그
     private List<String> imgUrls; // 기사 이미지 URL 리스트
 
+    // 서비스에서 태그와 이미지를 가져와서 DTO 를 생성
     public static ArticleWithTagsDTO from(Article article, TagService tagService, ImageService imageService) {
+        List<Tag> tags = tagService.findByArticle(article);
+        List<String> imgUrls = imageService.findByArticle(article).stream()
+                .map(Image::getImgUrl)
+                .collect(Collectors.toList());
+        return from(article, tags, imgUrls);
+    }
+
+    // 이미 태그와 이미지가 있을 때 DTO 를 생성
+    public static ArticleWithTagsDTO from(Article article, List<Tag> tags, List<String> imgUrls) {
         ArticleWithTagsDTO dto = new ArticleWithTagsDTO();
         dto.setId(article.getId());
         dto.setTitle(article.getTitle());
@@ -37,10 +47,8 @@ public class ArticleWithTagsDTO {
         dto.setPostDate(article.getPostDate());
         dto.setCategory(article.getCategory());
         dto.setSource(article.getSource());
-        dto.setTags(tagService.findByArticle(article));
-        dto.setImgUrls(imageService.findByArticle(article).stream()
-                .map(Image::getImgUrl)
-                .collect(Collectors.toList()));
+        dto.setTags(tags);
+        dto.setImgUrls(imgUrls);
         return dto;
     }
 }

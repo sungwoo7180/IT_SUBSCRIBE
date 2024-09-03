@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -84,4 +85,7 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
             "GROUP BY a " +
             "HAVING COUNT(DISTINCT ta.tag) = :tagCount")
     List<Article> findByCategoriesAndTags(@Param("categories") List<Category> categories, @Param("tags") List<Tag> tags, @Param("tagCount") long tagCount);
+
+    @Query("SELECT a FROM Article a WHERE a.postDate > :publishedAt AND a.category IN :categories")
+    List<Article> findByPublishedAtAfterAndCategoryIn(@Param("publishedAt") LocalDateTime publishedAt, @Param("categories") List<Category> categories);
 }

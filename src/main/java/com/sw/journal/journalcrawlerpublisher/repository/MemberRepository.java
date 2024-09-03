@@ -2,8 +2,12 @@ package com.sw.journal.journalcrawlerpublisher.repository;
 
 import com.sw.journal.journalcrawlerpublisher.domain.Member;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 @Repository
@@ -17,4 +21,8 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 
     // 유저 id 찾을 때
     Optional<Member> findByEmail(String email);
+
+    @Modifying
+    @Query("UPDATE Member m SET m.lastLogout = :logoutTime WHERE m.username = :username")
+    void updateLastLogoutTimeByUsername(@Param("username") String username, @Param("logoutTime") LocalDateTime logoutTime);
 }

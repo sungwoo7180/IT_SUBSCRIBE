@@ -29,7 +29,11 @@ public class Reply {
 
     @ManyToOne
     @JoinColumn(name = "comment_id", nullable = false)
-    private Comment parentComment;
+    private Comment parentComment; // 최상위 댓글에 대한 참조
+
+    @ManyToOne
+    @JoinColumn(name = "parent_reply_id") // 대댓글에 대한 참조
+    private Reply parentReply;
 
     @Column(nullable = false)
     private int likeCount = 0;
@@ -55,4 +59,18 @@ public class Reply {
         this.likeCount--;
     }
 
+//    @PrePersist
+//    public void incrementReplyCount() {
+//        parentComment.setReplyCount(parentComment.getReplyCount() + 1);
+//    }
+//
+//    @PreRemove
+//    public void decrementReplyCount() {
+//        parentComment.setReplyCount(parentComment.getReplyCount() - 1);
+//    }
+
+    // 부모 댓글이 있는지 확인
+    public boolean hasParentReply() {
+        return this.parentReply != null;
+    }
 }

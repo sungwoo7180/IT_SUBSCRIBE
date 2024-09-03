@@ -40,7 +40,12 @@ class ArticleRankServiceTest {
     public void sendFromDBToRedis(){  // isActive(랭킹 활성)이 true인 값만 Redis에 넣음
         List<ArticleRank> activeArticles = articleRankRepository.findAllByIsActive(true);
         for (ArticleRank articleRank : activeArticles) {
-            redisTemplate.opsForZSet().add(ARTICLE_RANK_KEY, articleRank.getId().toString(), articleRank.getViews());
+            try {
+                redisTemplate.opsForZSet().add(ARTICLE_RANK_KEY, articleRank.getId().toString(), articleRank.getViews());
+            } catch (Exception e) {
+                // 예외 발생 시 로깅 및 처리
+                System.err.println("Failed to add article rank to Redis: " + e.getMessage());
+            }
         }
     }
 

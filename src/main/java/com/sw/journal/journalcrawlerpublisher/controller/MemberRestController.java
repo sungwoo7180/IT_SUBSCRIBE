@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sw.journal.journalcrawlerpublisher.domain.*;
 import com.sw.journal.journalcrawlerpublisher.dto.*;
+import com.sw.journal.journalcrawlerpublisher.repository.ArticleRepository;
 import com.sw.journal.journalcrawlerpublisher.repository.CategoryRepository;
 import com.sw.journal.journalcrawlerpublisher.repository.MemberRepository;
 import com.sw.journal.journalcrawlerpublisher.repository.UserFavoriteCategoryRepository;
@@ -35,7 +36,9 @@ import java.io.IOException;
 import java.net.MalformedURLException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequiredArgsConstructor
@@ -48,6 +51,9 @@ public class MemberRestController {
     private final MemberRepository memberRepository;
     private final CategoryRepository categoryRepository;
     private final UserFavoriteCategoryRepository userFavoriteCategoryRepository;
+    private final ArticleRepository articleRepository;
+
+
 
     // 비밀번호 암호화를 위한 PasswordEncoder 인스턴스
     private final PasswordEncoder passwordEncoder;
@@ -149,15 +155,27 @@ public class MemberRestController {
                 securityContext // 위에서 설정한 SecurityContext 객체를 세션에 저장
         );
 
+        // 선호 카테고리 목록 추출
+        List<Category> preferredCategories = member.getFavoriteCategories().stream()
+                .map(UserFavoriteCategory::getCategory)
+                .collect(Collectors.toList());
+
+        // 마지막 로그아웃 시간 이후의 새 기사 조회
+        List<Article> newArticles = articleRepository.findByPublishedAtAfterAndCategoryIn(
+                member.getLastLogout(),
+                preferredCategories
+        );
+
         // 사용자 정보와 성공 메시지 반환
         Map<String, Object> userInfo = new HashMap<>(); // 클라이언트에게 반환할 사용자 정보를 저장할 맵 객체 생성
+        userInfo.put("userId", member.getId()); // 사용자 ID를 추가
         userInfo.put("message", "로그인에 성공했습니다."); // 로그인 성공 메시지 추가
         userInfo.put("nickname", member.getNickname()); // 사용자 닉네임 추가
         userInfo.put("email", member.getEmail()); // 사용자 이메일 추가
         userInfo.put("avatarUrl", member.getProfileImage() != null // 사용자 프로필 이미지가 존재하는지 확인
                 ? member.getProfileImage().getFileUrl() // 프로필 이미지가 있으면 이미지 URL 추가
                 : null); // 프로필 이미지가 없으면 null 값 설정
-
+        userInfo.put("newArticles", newArticles);
         // 사용자 정보를 포함한 HTTP 200 OK 응답을 클라이언트에게 반환
         return ResponseEntity.ok(userInfo);
     }
@@ -165,13 +183,28 @@ public class MemberRestController {
     // 로그아웃
     @PostMapping("/logout")
     public ResponseEntity<String> logout(HttpServletRequest request) {
+
         // 현재 세션 무효화
         HttpSession session = request.getSession(false);
         if (session != null) {
             session.invalidate();
         }
+
         // SecurityContext 를 클리어하여 사용자 인증 정보 삭제
         SecurityContextHolder.clearContext();
+
+        // 현재 로그인 사용자 정보 가져오기
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof UserDetails) {
+            UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+            Optional<Member> optionalMember = memberRepository.findByUsername(userDetails.getUsername());
+            if (optionalMember.isPresent()) {
+                Member member = optionalMember.get();
+                member.setLastLogout(LocalDateTime.now());
+                memberRepository.save(member);
+            }
+        }
+
         return ResponseEntity.ok("로그아웃에 성공했습니다.");
     }
 

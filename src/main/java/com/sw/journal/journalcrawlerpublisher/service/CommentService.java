@@ -15,6 +15,7 @@ import com.sw.journal.journalcrawlerpublisher.repository.MemberRepository;
 import com.sw.journal.journalcrawlerpublisher.repository.ReplyRepository;
 import com.sw.journal.journalcrawlerpublisher.util.TimeUtils;
 import com.sw.journal.journalcrawlerpublisher.repository.ReportRepository;
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.security.core.Authentication;
@@ -25,11 +26,15 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static io.lettuce.core.pubsub.PubSubOutput.Type.message;
+
 @Service
 @RequiredArgsConstructor
 public class CommentService {
 
+
     // 의존성 주입 ( by 생성자 주입 )
+    private final NotificationService notificationService;  // NotificationService 주입
     private final CommentRepository commentRepository;
     private final ArticleRepository articleRepository;
     private final MemberRepository memberRepository;
@@ -48,6 +53,7 @@ public class CommentService {
     }
 
     // 1. 댓글 생성
+    @Transactional
     public CommentDTO createComment(CommentDTO commentDTO) {
         // 댓글을 작성한 기사 조회
         Article article = articleRepository.findById(commentDTO.getArticleId())
@@ -70,10 +76,17 @@ public class CommentService {
     }
 
     // 2. 대댓글 생성
+    @Transactional
     public ReplyDTO createReply(ReplyDTO replyDTO) {
         // 부모 댓글을 찾을 수 없을때 예외처리
         Comment parentComment = commentRepository.findById(replyDTO.getParentCommentId())
                 .orElseThrow(() -> new IllegalArgumentException("Invalid parent comment ID"));
+
+        Reply parentReply = null;
+        if (replyDTO.getParentReplyId() != null) {
+            parentReply = replyRepository.findById(replyDTO.getParentReplyId())
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid parent reply ID"));
+        }
 
         Member member = getAuthenticatedMember();
 
@@ -81,9 +94,40 @@ public class CommentService {
         Reply reply = new Reply();
         reply.setContent(replyDTO.getContent());
         reply.setMember(member);
-        reply.setParentComment(parentComment); // 부모 댓글 설정
+        reply.setParentComment(parentComment);  // 부모 댓글 설정
+        reply.setParentReply(parentReply);      // 부모 대댓글 있다면 설정
 
-        reply = replyRepository.save(reply); // Reply Repository 사용
+        reply = replyRepository.save(reply);    // Reply Repository 사용
+
+        // 부모 댓글의 대댓글 수 증가
+        parentComment.setReplyCount(parentComment.getReplyCount() + 1);
+        commentRepository.save(parentComment);
+
+        // 알림 전송 로직 추가
+        String articleUrl = "/article/" + parentComment.getArticle().getId();
+        String commentUrl = articleUrl + "/comments/" + parentComment.getId();
+        String replyUrl = commentUrl + "/replies/" + reply.getId();
+
+        // 알림 전송 로직 추가
+        if (parentReply != null) {
+            // 부모 대댓글 작성자에게 알림 전송
+            Long originalReplyAuthorId = parentReply.getMember().getId();
+            if (!originalReplyAuthorId.equals(member.getId())) {
+                String message = String.format(
+                        "%s님이 <a href='%s'>\"%s\" 기사</a>에서 당신의 <a href='%s'>대댓글</a>에 <a href='%s'>\"%s\"라고 답글</a>을 남겼습니다.",
+                        member.getNickname(), articleUrl, parentComment.getArticle().getTitle(), commentUrl, replyUrl, reply.getContent());
+                notificationService.sendNotification(originalReplyAuthorId, message);
+            }
+        } else {
+            // 부모 댓글 작성자에게 알림 전송
+            Long originalCommentAuthorId = parentComment.getMember().getId();
+            if (!originalCommentAuthorId.equals(member.getId())) {
+                String message = String.format(
+                        "%s님이 <a href='%s'>\"%s\" 기사</a>에서 당신의 <a href='%s'>댓글</a>에 <a href='%s'>\"%s\"라고 답글</a>을 남겼습니다.",
+                        member.getNickname(), articleUrl, parentComment.getArticle().getTitle(), commentUrl, replyUrl, reply.getContent());
+                notificationService.sendNotification(originalCommentAuthorId, message);
+            }
+        }
 
         return mapToReplyDTO(reply);
     }
@@ -97,11 +141,13 @@ public class CommentService {
             filter = "likes"; // 기본값 설정
         }
 
-        return commentRepository.findByArticleAndParentCommentIsNull(article)
+        return commentRepository.findByArticle(article)
                 .stream()
                 .map(comment -> {
                     CommentDTO commentDTO = mapToDTO(comment);
-                    commentDTO.setReplyCount(commentRepository.countByParentComment(comment));
+                    int replyCount = replyRepository.countByParentComment(comment);
+                    commentDTO.setReplyCount(replyCount);
+                    System.out.println("Comment ID: " + comment.getId() + " has " + replyCount + " replies.");
                     return commentDTO;
                 })
                 .sorted(getComparatorForFilter(filter))
@@ -118,7 +164,7 @@ public class CommentService {
         Comment parentComment = commentRepository.findById(commentId)
                 .orElseThrow(() -> new IllegalArgumentException("Invalid comment ID"));
 
-        return replyRepository.findByParentCommentOrderByCreatedAtDesc(parentComment) // 최신순 정렬
+        return replyRepository.findByParentCommentOrderByCreatedAtDesc(parentComment)
                 .stream()
                 .map(this::mapToReplyDTO)
                 .collect(Collectors.toList());
@@ -126,6 +172,7 @@ public class CommentService {
 
 
     // 5. 특정 댓글 수정
+    @Transactional
     public CommentDTO updateComment(Long commentId, CommentDTO commentDTO) {
         Member member = getAuthenticatedMember();
         // 댓글 조회
@@ -145,6 +192,7 @@ public class CommentService {
     }
 
     // 6. 대댓글 수정
+    @Transactional
     public ReplyDTO updateReply(Long replyId, ReplyDTO replyDTO) {
         Member member = getAuthenticatedMember();
         Reply reply = replyRepository.findById(replyId)
@@ -163,6 +211,7 @@ public class CommentService {
     }
 
     // 7. (최상위) 특정 댓글 삭제
+    @Transactional
     public void deleteComment(Long commentId) {
         Member member = getAuthenticatedMember();
         Comment comment = commentRepository.findById(commentId)
@@ -174,11 +223,10 @@ public class CommentService {
         }
 
         // 대댓글이 없는 최상위 댓글인지 확인
-        if (comment.getParentComment() == null && replyRepository.countByParentComment(comment) > 0) {
+        if (comment.getReplyCount() > 0) {
             // 최상위 댓글이고 대댓글이 존재하면, 내용과 닉네임을 변경
-            comment.setContent("삭제된 댓글입니다.");
+            comment.markAsDeleted();  // 여기서 isDeleted 를 true 로 변경
             // comment.getMember().setNickname("익명");
-            // TODO : React 에서 이 부분은
             commentRepository.save(comment);
         } else {
             // 대댓글이거나 최상위 댓글에 대댓글이 없는 경우 바로 삭제
@@ -187,6 +235,7 @@ public class CommentService {
     }
 
     // 8. 대댓글 삭제
+    @Transactional
     public void deleteReply(Long replyId) {
         Member member = getAuthenticatedMember();
         Reply reply = replyRepository.findById(replyId)
@@ -197,8 +246,17 @@ public class CommentService {
             throw new IllegalArgumentException("You do not have permission to delete this reply.");
         }
 
-        // 대댓글 삭제
+        Comment parentComment = reply.getParentComment();
         replyRepository.delete(reply);
+
+        // 부모 댓글의 대댓글 수 감소
+        parentComment.setReplyCount(parentComment.getReplyCount() - 1);
+        commentRepository.save(parentComment);
+
+        // 부모 댓글이 더 이상 대댓글이 없으면, 부모 댓글도 하드 삭제
+        if (parentComment.getReplyCount() == 0 && parentComment.isDeleted()) {
+            commentRepository.delete(parentComment);
+        }
     }
 
 
@@ -226,18 +284,25 @@ public class CommentService {
 
 
     // Comment 엔티티를 ReplyDTO 로 변환
-    private ReplyDTO mapToReplyDTO(Reply comment) {
+    private ReplyDTO mapToReplyDTO(Reply reply) {
         ReplyDTO replyDTO = new ReplyDTO();
-        replyDTO.setId(comment.getId());
-        replyDTO.setContent(comment.getContent());
-        replyDTO.setMemberId(comment.getMember().getId());
-        replyDTO.setMemberNickname(comment.getMember().getNickname());
-        replyDTO.setLikeCount(comment.getLikeCount());
-        replyDTO.setParentCommentId(comment.getParentComment().getId());
-        replyDTO.setRelativeTime(TimeUtils.getRelativeTime(comment.getCreatedAt()));
+        replyDTO.setId(reply.getId());
+        replyDTO.setContent(reply.getContent());
+        replyDTO.setMemberId(reply.getMember().getId());
+        replyDTO.setMemberNickname(reply.getMember().getNickname());
+        replyDTO.setLikeCount(reply.getLikeCount());
+        replyDTO.setParentCommentId(reply.getParentComment().getId());
+        // 부모 대댓글이 null이 아닌 경우에만 parentReplyId를 설정
+        if (reply.getParentReply() != null) {
+            replyDTO.setParentReplyId(reply.getParentReply().getId());
+        } else {
+            replyDTO.setParentReplyId(null);  // 부모 대댓글이 없는 경우 null로 설정
+        }
 
-        if (comment.getMember().getProfileImage() != null) {
-            replyDTO.setProfileImageURL(comment.getMember().getProfileImage().getFileUrl());
+        replyDTO.setRelativeTime(TimeUtils.getRelativeTime(reply.getCreatedAt()));
+
+        if (reply.getMember().getProfileImage() != null) {
+            replyDTO.setProfileImageURL(reply.getMember().getProfileImage().getFileUrl());
         } else {
             replyDTO.setProfileImageURL("default_image_url");
         }
@@ -255,6 +320,7 @@ public class CommentService {
     }
 
     // 9. 댓글 좋아요 토글
+    @Transactional
     public CommentDTO toggleLikeComment(Long commentId) {
         Comment comment = commentRepository.findById(commentId)
                 .orElseThrow(() -> new IllegalArgumentException("Invalid comment ID"));
@@ -275,6 +341,7 @@ public class CommentService {
     }
 
     // 10. 대댓글 좋아요 토글
+    @Transactional
     public ReplyDTO toggleLikeReply(Long replyId) {
         Member member = getAuthenticatedMember();
         Reply reply = replyRepository.findById(replyId)
