@@ -39,6 +39,7 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.time.LocalDate;
 
 @RestController
 @RequiredArgsConstructor
@@ -52,7 +53,6 @@ public class MemberRestController {
     private final CategoryRepository categoryRepository;
     private final UserFavoriteCategoryRepository userFavoriteCategoryRepository;
     private final ArticleRepository articleRepository;
-
 
 
     // 비밀번호 암호화를 위한 PasswordEncoder 인스턴스
@@ -135,6 +135,18 @@ public class MemberRestController {
             return ResponseEntity.badRequest().body("비밀번호가 일치하지 않습니다.");
         }
 
+        // memberId
+        Long memberId = member.getId();
+        // 계정이 정지된 상태인지 확인
+        Optional<LocalDate> banEndDateOpt = memberService.getBanEndDateByMemberId(memberId);
+        if (banEndDateOpt.isPresent()) {
+            // 계정 정지 상태와 종료일 반환
+            Map<String, Object> response = new HashMap<>();
+            response.put("message", "계정이 정지되었습니다.");
+            response.put("banEndDate", banEndDateOpt.get()); // 정지 종료일 추가
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+        }
+
         // 인증 정보 생성 및 SecurityContext 설정
         UserDetails userDetails = User.withUsername(member.getUsername()) // 인증된 사용자의 사용자 id를 기반으로 UserDetails 객체 생성
                 .password(member.getPassword()) // 사용자 비밀번호 설정(비밀번호는 이미 암호화된 상태)
@@ -176,6 +188,8 @@ public class MemberRestController {
                 ? member.getProfileImage().getFileUrl() // 프로필 이미지가 있으면 이미지 URL 추가
                 : null); // 프로필 이미지가 없으면 null 값 설정
         userInfo.put("newArticles", newArticles);
+        userInfo.put("role", member.getRole());
+
         // 사용자 정보를 포함한 HTTP 200 OK 응답을 클라이언트에게 반환
         return ResponseEntity.ok(userInfo);
     }
@@ -183,13 +197,11 @@ public class MemberRestController {
     // 로그아웃
     @PostMapping("/logout")
     public ResponseEntity<String> logout(HttpServletRequest request) {
-
         // 현재 세션 무효화
         HttpSession session = request.getSession(false);
         if (session != null) {
             session.invalidate();
         }
-
         // SecurityContext 를 클리어하여 사용자 인증 정보 삭제
         SecurityContextHolder.clearContext();
 

@@ -1,35 +1,40 @@
 package com.sw.journal.journalcrawlerpublisher.controller;
 
-import com.sw.journal.journalcrawlerpublisher.domain.Article;
-import com.sw.journal.journalcrawlerpublisher.domain.Category;
-import com.sw.journal.journalcrawlerpublisher.domain.Tag;
+import com.sw.journal.journalcrawlerpublisher.domain.*;
 import com.sw.journal.journalcrawlerpublisher.dto.ArticleWithTagsDTO;
-import com.sw.journal.journalcrawlerpublisher.dto.CommentDTO;
+import com.sw.journal.journalcrawlerpublisher.dto.MemberViewArticleDTO;
+import com.sw.journal.journalcrawlerpublisher.repository.MemberRepository;
 import com.sw.journal.journalcrawlerpublisher.service.CommentService;
 import com.sw.journal.journalcrawlerpublisher.service.ImageService;
 import com.sw.journal.journalcrawlerpublisher.service.ArticleService;
 import com.sw.journal.journalcrawlerpublisher.service.TagService;
-import com.sw.journal.journalcrawlerpublisher.domain.Image;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
+import org.hibernate.Hibernate;
 import org.springframework.data.domain.*;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 
 import java.util.*;
 import java.util.stream.Collectors;
+import org.springframework.transaction.annotation.Transactional;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/article")
+@RequestMapping("/api/article")
+//@RequestMapping("/article")
 public class ArticleController {
 
     private final ArticleService articleService;
     private final TagService tagService;
     private final ImageService imageService;
     private final CommentService commentService;
+    private final MemberRepository memberRepository;
 
 //     전체 기사 보기 (태그 포함)
 //    @GetMapping("/all")
@@ -95,13 +100,29 @@ public class ArticleController {
                 .collect(Collectors.toList());
     }
 
-    // 특정 기사에 대한 모든 댓글 조회
-    @GetMapping("/article/{articleId}")
-    public ResponseEntity<List<CommentDTO>> getCommentsByArticle(@PathVariable Long articleId) {
-        // 기사 ID로 댓글 리스트 조회
-        List<CommentDTO> comments = commentService.getCommentsByArticle(articleId);
-        // 조회된 댓글 리스트를 응답으로 반환
-        return ResponseEntity.ok(comments);
+    @GetMapping("/view/{articleId}")
+    public ResponseEntity<String> articleView(@PathVariable Long articleId, HttpServletRequest request) {
+        // 현재 로그인한 사용자 정보를 가져옴
+        // 사용자를 React에서 저장하지 않음 따라서 파라미터로 받지 못함
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        // 현재 로그인한 사용자의 id를 가져옴
+        String currentUsername = authentication.getName();
+        // 사용자 id로 Member 객체 조회
+        Optional<Member> member = memberRepository.findByUsername(currentUsername);
+
+        // 사용자가 존재하지 않는 경우 401 Unauthorized 응답 반환
+        if (member.isEmpty()) {
+            return ResponseEntity.badRequest().body("사용자 없음");
+        }
+        // 조회된 Member
+        Member currentMember = member.get();
+
+        MemberViewArticleDTO mva = new MemberViewArticleDTO();
+        mva.setMemberId(currentMember.getId());
+        mva.setArticleId(articleId);
+        mva.setRequest(request);
+
+        return ResponseEntity.ok("기사 조회 로깅");
     }
 
     // 카테고리 n개로 기사 조회
@@ -309,6 +330,140 @@ public class ArticleController {
                 }).collect(Collectors.toList());
 
         return new PageImpl<>(articleDTOs, pageable, articlePage.getTotalElements());
+    }
+
+    // 트라이에 대한 페이지네이션 테스트 메서드
+    @GetMapping("/trie")
+    @Transactional
+    public Page<ArticleWithTagsDTO> getTrieArticlesDTO(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "12") int size) {
+        Pageable pageable = PageRequest.of(page, size);
+
+        // getTrieArticles 메서드를 통해 기사를 가져옵니다.
+        Page<Article> articlePage = articleService.getTrieArticles(pageable);
+
+        List<Long> articleIds = articlePage.getContent().stream()
+                .map(Article::getId)
+                .collect(Collectors.toList());
+
+        Map<Long, List<Tag>> articleTagsMap = tagService.findTagsByArticleIds(articleIds);
+        Map<Long, List<Image>> articleImageMap = imageService.findImagesByArticleIds(articleIds);
+
+        List<ArticleWithTagsDTO> articleDTOs = articlePage.getContent().stream()
+                .map(article -> {
+                    ArticleWithTagsDTO dto = new ArticleWithTagsDTO();
+                    dto.setId(article.getId());
+                    dto.setTitle(article.getTitle());
+                    dto.setContent(article.getContent());
+                    dto.setPostDate(article.getPostDate());
+                    dto.setCategory(article.getCategory());
+                    dto.setSource(article.getSource());
+                    dto.setTags(articleTagsMap.getOrDefault(article.getId(), Collections.emptyList()));
+                    dto.setImgUrls(articleImageMap.getOrDefault(article.getId(), Collections.emptyList()).stream()
+                            .map(Image::getImgUrl)
+                            .collect(Collectors.toList()));
+                    return dto;
+                }).collect(Collectors.toList());
+
+        return new PageImpl<>(articleDTOs, pageable, articlePage.getTotalElements());
+    }
+
+    // 트라이 저장 값 확인 테스트 메서드
+    @GetMapping("/trielist")
+    public List<ArticleWithTagsDTO> getTrieArticles() {
+        // trie에서 모든 기사를 가져옵니다.
+        List<Article> allArticles = articleService.getTrieArticle().collectAllArticles(articleService.getTrieArticle().getRoot());
+
+        System.out.println("Total articles fetched: " + allArticles.size());
+
+        // 모든 기사 ID 리스트를 생성합니다.
+        List<Long> articleIds = allArticles.stream()
+                .map(Article::getId)
+                .collect(Collectors.toList());
+
+        System.out.println("Article IDs:");
+        articleIds.forEach(System.out::println);
+
+        // querydsl 로 category 에 대한 lazy 문제 해결
+
+        // 태그 및 이미지 정보를 가져옵니다.
+        Map<Long, List<Tag>> articleTagsMap = tagService.findTagsByArticleIds(articleIds);
+        Map<Long, List<Image>> articleImageMap = imageService.findImagesByArticleIds(articleIds);
+
+        // 각 Article 객체의 연관 엔티티를 초기화합니다.
+        for (Article article : allArticles) {
+            Hibernate.initialize(article.getCategory()); // 카테고리 초기화
+        }
+
+        // DTO로 매핑합니다.
+        List<ArticleWithTagsDTO> articleDTOs = allArticles.stream()
+                .map(article -> {
+                    ArticleWithTagsDTO dto = new ArticleWithTagsDTO();
+                    dto.setId(article.getId());
+                    dto.setTitle(article.getTitle());
+                    dto.setContent(article.getContent());
+                    dto.setPostDate(article.getPostDate());
+                    dto.setCategory(article.getCategory());
+                    dto.setSource(article.getSource());
+                    dto.setTags(articleTagsMap.getOrDefault(article.getId(), Collections.emptyList()));
+                    dto.setImgUrls(articleImageMap.getOrDefault(article.getId(), Collections.emptyList()).stream()
+                            .map(Image::getImgUrl)
+                            .collect(Collectors.toList()));
+                    return dto;
+                }).collect(Collectors.toList());
+
+        return articleDTOs;
+    }
+
+    // 검색 메서드
+    @Transactional(readOnly = true)
+    // 제목으로 기사 검색하는 메서드
+    @GetMapping("/search/{keyWords}")
+    public Page<ArticleWithTagsDTO> searchArticles(
+            @PathVariable String keyWords,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "12") int size,
+            HttpServletRequest request) {
+
+        // Trie에서 검색 키워드에 맞는 기사 리스트를 가져옴
+        List<Article> searchResults = articleService.searchArticle(keyWords);
+
+        // 페이징을 적용하기 위해 Pageable 생성
+        Pageable pageable = PageRequest.of(page, size);
+
+        // 검색된 기사 리스트에 대한 ID 리스트 생성
+        List<Long> articleIds = searchResults.stream()
+                .map(Article::getId)
+                .collect(Collectors.toList());
+
+        // 각 기사에 대한 태그 및 이미지 정보 맵 생성
+        Map<Long, List<Tag>> articleTagsMap = tagService.findTagsByArticleIds(articleIds);
+        Map<Long, List<Image>> articleImageMap = imageService.findImagesByArticleIds(articleIds);
+
+        // ArticleWithTagsDTO 리스트 생성
+        List<ArticleWithTagsDTO> articleDTOs = searchResults.stream()
+                .map(article -> {
+                    ArticleWithTagsDTO dto = new ArticleWithTagsDTO();
+                    dto.setId(article.getId());
+                    dto.setTitle(article.getTitle());
+                    dto.setContent(article.getContent());
+                    dto.setPostDate(article.getPostDate());
+                    dto.setCategory(article.getCategory());
+                    dto.setSource(article.getSource());
+                    dto.setTags(articleTagsMap.getOrDefault(article.getId(), Collections.emptyList()));
+                    dto.setImgUrls(articleImageMap.getOrDefault(article.getId(), Collections.emptyList()).stream()
+                            .map(Image::getImgUrl)
+                            .collect(Collectors.toList()));
+                    return dto;
+                }).collect(Collectors.toList());
+
+        // 검색 결과를 페이징 처리하여 반환
+        int start = (int) pageable.getOffset();
+        int end = Math.min((start + pageable.getPageSize()), articleDTOs.size());
+        List<ArticleWithTagsDTO> pagedArticleDTOs = articleDTOs.subList(start, end);
+
+        return new PageImpl<>(pagedArticleDTOs, pageable, articleDTOs.size());
     }
 
     // 기사 ID로 특정 기사 가져오기
