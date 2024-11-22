@@ -103,7 +103,7 @@ public class ArticleController {
     @GetMapping("/view/{articleId}")
     public ResponseEntity<String> articleView(@PathVariable Long articleId, HttpServletRequest request) {
         // 현재 로그인한 사용자 정보를 가져옴
-        // 사용자를 React에서 저장하지 않음 따라서 파라미터로 받지 못함
+        // 사용자를 React 에서 저장하지 않음 따라서 파라미터로 받지 못함
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         // 현재 로그인한 사용자의 id를 가져옴
         String currentUsername = authentication.getName();
@@ -484,5 +484,6 @@ public class ArticleController {
             return ResponseEntity.notFound().build();
         }
     }
+
 
 }
